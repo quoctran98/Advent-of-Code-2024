@@ -34,6 +34,17 @@ fn parse_to_disk(disk_map: &Vec<i32>) -> Vec<i32> {
     return disk
 }
 
+fn parse_to_disk2(chunk_sizes: &Vec<i32>, chunk_ids: &Vec<i32>) -> Vec<i32> {
+    let mut disk: Vec<i32> = Vec::new();
+    for i in 0..chunk_sizes.len() {
+        let size = chunk_sizes[i];
+        let id = chunk_ids[i];
+        let new_files = vec![id; (size as usize).try_into().unwrap()];
+        disk.extend(new_files);
+    }
+    return disk
+}
+
 // Probably worse than just using .find and .reverse, but this is nicer somehow...
 fn move_head(disk: &Vec<i32>, head_start: usize, target: &str, direction: &str) -> Option<usize> {
     let mut head = head_start;
@@ -64,18 +75,31 @@ fn move_head(disk: &Vec<i32>, head_start: usize, target: &str, direction: &str) 
     return Some(head);
 }
 
-fn checksum(disk: &Vec<i32>) -> i64 {
+fn checksum(disk: &Vec<i32>, enforce_empty_blocks: bool) -> i64 {
     let mut sum: i64 = 0;
     let mut seen_empty_blocks = false;
     for (index, block) in disk.iter().enumerate() {
         if block >= &0 { // How does it make sense that I have to borrow a zero literal?
-            assert!(!seen_empty_blocks);
+            if enforce_empty_blocks {
+                assert!(!seen_empty_blocks);
+            }
             sum += &(index as i64) * &(*block as i64);
         } else {
             seen_empty_blocks = true;
         }
     }
     return sum
+}
+
+fn find_empty_chunk(chunk_sizes: &Vec<i32>, chunk_ids: &Vec<i32>, this_size: i32, this_index: usize) -> Option<usize> {
+    for index in 0..this_index { // Loop starting at the left until this_index (exclusive)
+        if chunk_ids[index] == -1 { // Only consider open spots
+            if chunk_sizes[index] >= this_size { // With enough size
+                return Some(index)
+            }
+        }
+    }
+    return None
 }
 
 fn part1(input: &Vec<i32>) {
@@ -104,12 +128,77 @@ fn part1(input: &Vec<i32>) {
             _ => done = true,
         }
     }
-    println!("{}", checksum(&disk));
+    println!("{}", checksum(&disk, true));
 }
 
-fn part2(input: &Vec<i32> {
-    let mut disk = parse_to_disk(input); 
+fn part2(input: &Vec<i32>) {
+    // Harder to work with the actual disk, so let's work with the input chunks
+    let mut chunk_sizes: Vec<i32> = input.clone();
+    let mut chunk_ids: Vec<i32> = Vec::new();
+    let mut file_flag: bool = true;
+    let mut file_id: i32 = 0;
+    for _ in chunk_sizes.iter() {
+        if file_flag {
+            chunk_ids.push(file_id);
+            file_id += 1;
+        } else {
+            chunk_ids.push(-1);
+        }
+        file_flag = !file_flag;
+    }
+    assert!(chunk_sizes.len() == chunk_ids.len());
 
+    // Let's sort chunks in this format (we can't do a for loop because we're modifying so many things)
+    let mut head: usize = chunk_sizes.len() - 1;
+    while head >= 0 {
+        // let disk = parse_to_disk2(&chunk_sizes, &chunk_ids);
+        // println!("{}", disk.iter().map(|x| if *x == -1 { ".".to_string() } else { x.to_string() }).collect::<String>());
+        // Look for empty block given current chunks
+        let size = chunk_sizes[head];
+        let id = chunk_ids[head];
+
+        if id != -1 { // Skip swapping empty chunks (without this I failed but not sure why since swapping empty chunks should be equivalent)
+            let chunk_result: Option<usize> = find_empty_chunk(&chunk_sizes, &chunk_ids, size, head);
+            // Check and move chunks
+            match chunk_result {
+                Some(left_i) => {
+
+                    // Make sure it's left of current index! Function doesn't check :)
+                    let right_i = head.clone();
+                    assert!(left_i < right_i);
+                    assert!(chunk_ids[left_i] == -1);
+
+                    // Do a direct swap
+                    chunk_sizes[right_i] = chunk_sizes[left_i];
+                    chunk_ids[right_i] = chunk_ids[left_i];
+                    chunk_sizes[left_i] = size;
+                    chunk_ids[left_i] = id;
+
+                    // But we may need to add chunks and adjust sizes!
+                    if chunk_sizes[left_i] < chunk_sizes[right_i] {
+                        let size_diff: i32 = chunk_sizes[right_i] - chunk_sizes[left_i];
+                        chunk_sizes[right_i] -= size_diff; // Take away free empty space that got moved right
+                        // Add an empty space chunk after the file chunk that got moved left
+                        chunk_sizes.insert(left_i + 1, size_diff);
+                        chunk_ids.insert(left_i + 1, -1);
+                    } 
+                }
+                _ => {}
+        }
+        
+        }
+        // Decrement counter
+        // If I moved things around, I won't have to worry about underflow, but this is cleaner.
+        if head == 0 {
+            break
+        } else {
+            head -= 1;
+        }
+    }
+
+    // Parse to disk then calculate checksum
+    let disk = parse_to_disk2(&chunk_sizes, &chunk_ids);
+    println!("{}", checksum(&disk, false));
 }
 
 fn main() {
